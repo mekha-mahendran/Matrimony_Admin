@@ -1,4 +1,5 @@
 import React from 'react';
+import logoImg from '../assets/logo.png';
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -66,17 +67,21 @@ export const Sidebar = ({ currentTab, onSelectTab, isOpen, onClose, pendingCount
         }`}
       >
         <div>
-          {/* Header & Logo */}
-          <div class="px-6 py-6 border-b border-[#F0F0F5] flex items-center justify-between">
+          {/* Header & Logo matching Mobile App */}
+          <div className="px-6 py-6 border-b border-[#F0F0F5] flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-[#6D53F5] flex items-center justify-center text-white shadow-md shadow-[#6D53F5]/30">
-                <Sparkles className="w-5 h-5 fill-white/20" />
+              <div className="w-11 h-11 rounded-2xl bg-[#F7F5FF] border border-[#EDE8FF] flex items-center justify-center shadow-xs overflow-hidden p-1.5">
+                <img
+                  src={logoImg}
+                  alt="Manamaalai Matrimony Logo"
+                  className="w-full h-full object-contain"
+                />
               </div>
               <div>
                 <h1 className="text-base font-extrabold text-[#18181D] tracking-tight leading-none">
                   MANAMAALAI
                 </h1>
-                <span className="text-[10px] font-bold text-[#6D53F5] uppercase tracking-wider">
+                <span className="text-[10px] font-bold text-[#6D53F5] uppercase tracking-wider block mt-1">
                   Admin Control Portal
                 </span>
               </div>
