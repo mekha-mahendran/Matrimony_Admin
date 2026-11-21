@@ -36,13 +36,6 @@ export const Sidebar = ({ currentTab, onSelectTab, isOpen, onClose, pendingCount
       badgeColor: 'bg-purple-100 text-[#6D53F5]',
     },
     {
-      id: 'branches',
-      label: 'Regional Branches',
-      icon: Building2,
-      badge: '5 TN Hubs',
-      badgeColor: 'bg-emerald-100 text-emerald-700',
-    },
-    {
       id: 'settings',
       label: 'Admin Settings',
       icon: Settings,

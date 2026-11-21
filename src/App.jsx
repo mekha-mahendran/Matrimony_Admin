@@ -1,20 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DashboardView } from './views/DashboardView';
 import { ProfilesView } from './views/ProfilesView';
 import { SubscriptionsView } from './views/SubscriptionsView';
-import { BranchesView } from './views/BranchesView';
 import { SettingsView } from './views/SettingsView';
 import { ProfileDetailModal } from './components/ProfileDetailModal';
 import { EReceiptModal } from './components/EReceiptModal';
-import { MOCK_PROFILES, MOCK_BRANCHES, MOCK_TRANSACTIONS } from './data/mockData';
+import { MOCK_TRANSACTIONS } from './data/mockData';
+import { adminApi } from './services/api';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
-  const [profiles, setProfiles] = useState(MOCK_PROFILES);
-  const [transactions, setTransactions] = useState(MOCK_TRANSACTIONS);
-  const [branches, setBranches] = useState(MOCK_BRANCHES);
+  const [profiles, setProfiles] = useState([]);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(true);
+  const [apiError, setApiError] = useState(null);
+  const [transactions] = useState(MOCK_TRANSACTIONS);
 
   // Search & Navigation
   const [searchQuery, setSearchQuery] = useState('');
@@ -25,97 +26,154 @@ export default function App() {
   const [selectedTransaction, setSelectedTransaction] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
 
-  const showToast = msg => {
+  const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const handleVerifyProfile = profileId => {
-    setProfiles(prev =>
-      prev.map(p =>
-        p.id === profileId
-          ? {
-              ...p,
-              isVerified: true,
-              verificationDocType: 'Aadhaar Card (UIDAI Verified)',
-              status: 'active',
-            }
-          : p
-      )
-    );
-    showToast('Aadhaar Trust Badge awarded successfully!');
+  const loadProfiles = useCallback(async (showNotification = false) => {
+    try {
+      setIsLoadingProfiles(true);
+      setApiError(null);
+      const dbProfiles = await adminApi.getProfiles();
+      setProfiles(dbProfiles);
+      if (showNotification) {
+        showToast(`Loaded ${dbProfiles.length} profile(s) from AWS DynamoDB`);
+      }
+    } catch (err) {
+      console.error('[Admin Load Profiles Error]', err);
+      setApiError(err.message || 'Could not fetch profiles from backend');
+    } finally {
+      setIsLoadingProfiles(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProfiles();
+  }, [loadProfiles]);
+
+  // 1. Approve Profile
+  const handleApproveProfile = async (profileId) => {
+    try {
+      const updated = await adminApi.updateProfileStatus(profileId, 'approve');
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? updated : p))
+      );
+      if (selectedProfile?.id === profileId) {
+        setSelectedProfile(updated);
+      }
+      showToast('Profile approved & Aadhaar Verified badge granted!');
+    } catch (err) {
+      showToast(`Failed to approve: ${err.message}`);
+    }
   };
 
-  const handleSuspendProfile = profileId => {
+  // 2. Reject Profile
+  const handleRejectProfile = async (profileId) => {
+    const reason = window.prompt(
+      'Enter rejection reason (optional):',
+      'Incomplete KYC details or unclear photo'
+    );
+    if (reason === null) return; // Cancelled prompt
+
+    try {
+      const updated = await adminApi.updateProfileStatus(profileId, 'reject', reason);
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? updated : p))
+      );
+      if (selectedProfile?.id === profileId) {
+        setSelectedProfile(updated);
+      }
+      showToast('Profile rejected.');
+    } catch (err) {
+      showToast(`Failed to reject: ${err.message}`);
+    }
+  };
+
+  // 3. Suspend Profile
+  const handleSuspendProfile = async (profileId) => {
     const confirmed = window.confirm(
-      'Are you sure you want to suspend this candidate profile for terms violation?'
+      'Are you sure you want to suspend this candidate profile?'
     );
     if (!confirmed) return;
 
-    setProfiles(prev =>
-      prev.map(p =>
-        p.id === profileId
-          ? {
-              ...p,
-              isVerified: false,
-              status: 'suspended',
-            }
-          : p
-      )
-    );
-    showToast('Profile suspended.');
+    try {
+      const updated = await adminApi.updateProfileStatus(
+        profileId,
+        'suspend',
+        'Suspended by administrator'
+      );
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? updated : p))
+      );
+      if (selectedProfile?.id === profileId) {
+        setSelectedProfile(updated);
+      }
+      showToast('Profile suspended.');
+    } catch (err) {
+      showToast(`Failed to suspend: ${err.message}`);
+    }
   };
 
-  const handleCreateNewProfile = () => {
+  // 4. Delete Profile Permanently
+  const handleDeleteProfile = async (profileId) => {
+    const target = profiles.find((p) => p.id === profileId);
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently DELETE "${target?.name || profileId}" from the database? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await adminApi.deleteProfile(profileId);
+      setProfiles((prev) => prev.filter((p) => p.id !== profileId));
+      if (selectedProfile?.id === profileId) {
+        setSelectedProfile(null);
+      }
+      showToast('Profile permanently deleted from database.');
+    } catch (err) {
+      showToast(`Failed to delete: ${err.message}`);
+    }
+  };
+
+  // Create New Profile in DynamoDB
+  const handleCreateNewProfile = async () => {
     const name = window.prompt('Enter Candidate Full Name (e.g., Meenakshi Ramanathan):');
     if (!name) return;
 
-    const newProfile = {
-      id: `mm-new-${Date.now()}`,
-      matrimonyId: `MM-TN-${Math.floor(2000 + Math.random() * 8000)}`,
-      name,
-      gender: 'bride',
-      age: 25,
-      maritalStatus: 'Never Married',
-      religion: 'Hindu',
-      caste: 'Pillai',
-      subCaste: 'Saiva Pillai',
-      nativeDistrict: 'Madurai',
-      currentCity: 'Chennai',
-      education: 'B.Tech IT',
-      occupation: 'Software Engineer',
-      employer: 'Infosys',
-      annualIncome: '₹ 14 - 16 Lakhs',
-      photos: [
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
-      ],
-      about: `${name} is looking for a caring, well-educated Tamil groom with traditional family roots.`,
-      horoscope: {
-        rasi: 'Kanni (கன்னி)',
-        nakshatram: 'Hastham',
-        lagnam: 'Simmam',
-        chevvaiDosham: false,
-      },
-      family: {
-        fatherName: 'K. Ramanathan',
-        fatherOccupation: 'Business',
-        motherName: 'Kalyani',
-        motherOccupation: 'Homemaker',
-        familyStatus: 'Upper Middle Class',
-      },
-      isVerified: false,
-      verificationDocType: 'Aadhaar e-KYC Pending Upload',
-      membershipTier: 'monthly',
-      registeredDate: new Date().toISOString().split('T')[0],
-      status: 'pending',
-    };
+    try {
+      const created = await adminApi.createProfile({
+        name,
+        gender: 'bride',
+        age: 25,
+        maritalStatus: 'never_married',
+        religion: 'Hindu',
+        caste: 'Pillai',
+        subCaste: 'Saiva Pillai',
+        nativeDistrict: 'Madurai',
+        currentCity: 'Chennai',
+        education: 'B.Tech IT',
+        occupation: 'Software Engineer',
+        employer: 'Infosys',
+        annualIncome: '₹ 14 - 16 Lakhs',
+        photos: [
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80',
+        ],
+        about: `${name} is looking for a caring, well-educated life partner.`,
+        status: 'pending',
+        isVerified: false,
+      });
 
-    setProfiles([newProfile, ...profiles]);
-    showToast(`New profile for ${name} added!`);
-    setCurrentTab('profiles');
+      setProfiles((prev) => [created, ...prev]);
+      showToast(`New profile for ${name} saved to AWS DynamoDB!`);
+      setCurrentTab('profiles');
+    } catch (err) {
+      showToast(`Failed to create profile: ${err.message}`);
+    }
   };
 
-  const pendingCount = profiles.filter(p => !p.isVerified).length;
+  const pendingCount = profiles.filter(
+    (p) => p.status === 'pending' || (!p.isVerified && p.status !== 'rejected' && p.status !== 'suspended')
+  ).length;
 
   return (
     <div className="min-h-screen w-full bg-[#F8F9FD] flex">
@@ -149,22 +207,29 @@ export default function App() {
           {currentTab === 'dashboard' && (
             <DashboardView
               profiles={profiles}
+              isLoading={isLoadingProfiles}
               transactions={transactions}
-              branches={branches}
-              onVerifyProfile={handleVerifyProfile}
+              onVerifyProfile={handleApproveProfile}
+              onRejectProfile={handleRejectProfile}
               onViewProfile={setSelectedProfile}
               onViewReceipt={setSelectedTransaction}
               onNavigateTab={setCurrentTab}
+              onRefresh={() => loadProfiles(true)}
             />
           )}
 
           {currentTab === 'profiles' && (
             <ProfilesView
               profiles={profiles}
+              isLoading={isLoadingProfiles}
+              apiError={apiError}
               searchQuery={searchQuery}
-              onVerifyProfile={handleVerifyProfile}
+              onApproveProfile={handleApproveProfile}
+              onRejectProfile={handleRejectProfile}
               onSuspendProfile={handleSuspendProfile}
+              onDeleteProfile={handleDeleteProfile}
               onViewProfile={setSelectedProfile}
+              onRefresh={() => loadProfiles(true)}
             />
           )}
 
@@ -173,10 +238,6 @@ export default function App() {
               transactions={transactions}
               onViewReceipt={setSelectedTransaction}
             />
-          )}
-
-          {currentTab === 'branches' && (
-            <BranchesView branches={branches} />
           )}
 
           {currentTab === 'settings' && (
@@ -189,8 +250,10 @@ export default function App() {
       <ProfileDetailModal
         profile={selectedProfile}
         onClose={() => setSelectedProfile(null)}
-        onVerify={handleVerifyProfile}
+        onApprove={handleApproveProfile}
+        onReject={handleRejectProfile}
         onSuspend={handleSuspendProfile}
+        onDelete={handleDeleteProfile}
       />
 
       {/* Barcode E-Receipt Modal */}
